@@ -1,137 +1,103 @@
-import { useState } from 'react';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Transaction } from './Dashboard';
-import { motion } from 'motion/react';
-import { Plus, CheckCircle2 } from 'lucide-react';
+"use client";
+
+import { useState } from "react";
+import { motion } from "motion/react";
+import { Plus, CheckCircle2 } from "lucide-react";
+
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 
 interface AddTransactionFormProps {
-  onAddTransaction: (transaction: Omit<Transaction, 'id' | 'date'>) => void;
+  onAddTransaction: (payload: {
+    receiverUsername: string;
+    amount: number;
+    isAnimated: boolean;
+  }) => Promise<void>;
 }
 
-export function AddTransactionForm({ onAddTransaction }: AddTransactionFormProps) {
-  const [description, setDescription] = useState('');
-  const [amount, setAmount] = useState('');
-  const [category, setCategory] = useState('');
-  const [type, setType] = useState<'income' | 'expense'>('expense');
+export function AddTransactionForm({
+  onAddTransaction,
+}: AddTransactionFormProps) {
+  const [receiver, setReceiver] = useState("");
+  const [amount, setAmount] = useState("");
   const [showSuccess, setShowSuccess] = useState(false);
+  const [loading, setLoading] = useState(false); // 🔹 loading state
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    onAddTransaction({
-      description,
-      amount: parseFloat(amount),
-      category,
-      type,
-    });
+    if (loading) return; // prevent double click
 
-    // Show success animation
-    setShowSuccess(true);
-    
-    // Reset form
-    setDescription('');
-    setAmount('');
-    setCategory('');
-    
-    // Hide success animation after 2 seconds
-    setTimeout(() => {
-      setShowSuccess(false);
-    }, 2000);
+    setLoading(true);
+    try {
+      await onAddTransaction({
+        receiverUsername: receiver,
+        amount: Number(amount),
+        isAnimated: false,
+      });
+
+      setShowSuccess(true);
+      setReceiver("");
+      setAmount("");
+      setTimeout(() => setShowSuccess(false), 2000);
+    } catch (err) {
+      console.error("Transaction failed:", err);
+    } finally {
+      setLoading(false); // 🔹 re-enable button
+    }
   };
 
   return (
     <Card className="relative overflow-hidden">
       <CardHeader>
-        <CardTitle>Add New Transaction</CardTitle>
+        <CardTitle>Add Transaction</CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="type">Type</Label>
-              <Select value={type} onValueChange={(v) => setType(v as 'income' | 'expense')}>
-                <SelectTrigger id="type">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="income">Income</SelectItem>
-                  <SelectItem value="expense">Expense</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="amount">Amount</Label>
-              <Input
-                id="amount"
-                type="number"
-                step="0.01"
-                placeholder="0.00"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                required
-              />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="description">Description</Label>
+          <div>
+            <Label>Receiver name</Label>
             <Input
-              id="description"
-              type="text"
-              placeholder="e.g., Morning Coffee"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              placeholder="McDonalds / HolyCrusad"
+              value={receiver}
+              onChange={(e) => setReceiver(e.target.value)}
               required
+              disabled={loading} // 🔹 disable while loading
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="category">Category</Label>
-            <Select value={category} onValueChange={setCategory} required>
-              <SelectTrigger id="category">
-                <SelectValue placeholder="Select category" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="coffee">Coffee</SelectItem>
-                <SelectItem value="food">Food</SelectItem>
-                <SelectItem value="transport">Transport</SelectItem>
-                <SelectItem value="entertainment">Entertainment</SelectItem>
-                <SelectItem value="shopping">Shopping</SelectItem>
-                <SelectItem value="utilities">Utilities</SelectItem>
-                <SelectItem value="income">Income</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
-              </SelectContent>
-            </Select>
+          <div>
+            <Label>Amount</Label>
+            <Input
+              type="number"
+              min="1"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              required
+              disabled={loading} // 🔹 disable while loading
+            />
           </div>
 
-          <Button type="submit" className="w-full">
-            <Plus className="mr-2 h-4 w-4" />
-            Add Transaction
+          <Button className="w-full" disabled={loading}>
+            {loading ? (
+              "Sending..."
+            ) : (
+              <>
+                <Plus className="mr-2 h-4 w-4" /> Send Money
+              </>
+            )}
           </Button>
         </form>
       </CardContent>
 
-      {/* Success Animation Overlay */}
       {showSuccess && (
         <motion.div
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0 }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
           className="absolute inset-0 bg-green-500/95 flex items-center justify-center"
         >
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1, rotate: 360 }}
-            transition={{ type: 'spring', duration: 0.6 }}
-            className="text-white"
-          >
-            <CheckCircle2 className="h-24 w-24" />
-          </motion.div>
+          <CheckCircle2 className="h-24 w-24 text-white" />
         </motion.div>
       )}
     </Card>
