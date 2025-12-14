@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { gsap } from "gsap";
-import { PendingAnimationTransaction } from "@/app/vault/page";
+import { PendingAnimationTransaction, User } from "@/app/vault/page";
 
 interface SlotMesh extends THREE.Mesh {
   slotIndex?: number;
@@ -24,7 +24,6 @@ interface GoldBar {
 const SHELF_ROWS = 5;
 const SHELF_COLS = 10;
 const TOTAL_BARS = 200;
-const BALANCE = 6000; // Current balance in USD (will be updated dynamically)
 const THIEF_ENTRY_DURATION = 1.5; // Thief entry animation duration (seconds)
 const THIEF_THEFT_DURATION = 0.6; // Bar theft animation duration (seconds)
 const THIEF_EXIT_DURATION = 1.8; // Thief exit animation duration (seconds)
@@ -34,19 +33,20 @@ export default function VaultRender({
   modelPath,
   pricePerBar,
   notAnimatedTransactions = [],
+  user,
 }: {
   modelPath: string;
   pricePerBar: number;
   notAnimatedTransactions?: PendingAnimationTransaction[];
+  user: User;
 }) {
-  //   const modelPath =
-  //     Math.random() > 0.5 ? "/models/kfc.glb" : "/models/mcdonalds.glb";
-
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Display state (doesn't trigger scene rebuild)
-  const [currentBalance, setCurrentBalance] = useState(BALANCE); // Track balance in USD
-  const [totalBars, setTotalBars] = useState(Math.floor(BALANCE / pricePerBar)); // Calculate from balance
+  const [currentBalance, setCurrentBalance] = useState(user.balance); // Track balance in USD
+  const [totalBars, setTotalBars] = useState(
+    Math.floor(user.balance / pricePerBar)
+  ); // Calculate from balance
   const [isAnimating, setIsAnimating] = useState(false);
   const [showNotification, setShowNotification] = useState(false);
   const [notificationAmount, setNotificationAmount] = useState(0);
@@ -491,7 +491,7 @@ export default function VaultRender({
 
     // Gold bars - detailed design
     const goldBars: GoldBar[] = [];
-    const initialBars = Math.floor(BALANCE / pricePerBar);
+    const initialBars = Math.floor(user.balance / pricePerBar);
     const maxVisibleBars = Math.min(initialBars, TOTAL_BARS); // Don't exceed shelf capacity
 
     const createGoldBar = (position: THREE.Vector3): THREE.Group => {
@@ -738,7 +738,7 @@ export default function VaultRender({
     setSceneReady(true);
     console.log("Scene initialized and ready for transactions");
 
-    // Don't override totalBars - keep it based on BALANCE
+    // Don't override totalBars - keep it based on user.balance
     // The actual bars created may be limited by shelf capacity, but balance should reflect actual balance
 
     // Animation loop
