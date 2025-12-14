@@ -257,24 +257,28 @@ export default function VaultPage() {
     // Shelving system
     const createShelves = (wallSide: "left" | "right"): THREE.Group => {
       const shelfGroup = new THREE.Group();
-      const rows = shelfRows;
+      // FORCE 5 ROWS - ignore state for now to fix the issue
       const cols = shelfCols;
       const shelfWidth = 2.2; // Increased to fit larger slots
       const shelfDepth = 0.4; // Increased depth
       const slotWidth = 2.2; // Increased to fit larger bars
       const slotHeight = 0.45; // Increased height
       const slotDepth = 1.4; // Increased depth
-      // Calculate spacing to fit within room height
-      const maxShelfHeight = roomHeight - 1; // Leave 1 unit from top
-      const verticalSpacing = Math.min(2.5, maxShelfHeight / (rows + 1));
+      // Calculate spacing to fit within room height - ensure all rows are visible
+      const bottomMargin = 0.5; // Space from floor
+      const topMargin = 1.0; // Space from ceiling
+      const availableHeight = roomHeight - bottomMargin - topMargin;
+      // Fixed spacing for 5 rows
+      const verticalSpacing = availableHeight / 4; // 5 rows means 4 gaps
       const horizontalSpacing = 1.8; // Increased spacing for larger bars
       const wallOffset = roomSize / 2 - 0.5;
       const xPos = wallSide === "left" ? -wallOffset : wallOffset;
 
       const ledLights: THREE.PointLight[] = [];
 
-      for (let row = 0; row < rows; row++) {
-        const yPos = 1 + row * verticalSpacing;
+      // Create exactly 5 rows
+      for (let row = 0; row < 5; row++) {
+        const yPos = bottomMargin + row * verticalSpacing;
 
         // LED light above shelf
         const ledLight = new THREE.PointLight(0xffffff, 0.5, 10);
@@ -282,8 +286,12 @@ export default function VaultPage() {
         scene.add(ledLight);
         ledLights.push(ledLight);
 
+        // Center the shelves in the room (not stuck to edges)
+        const totalShelfWidth = (cols - 1) * horizontalSpacing;
+        const startZ = -totalShelfWidth / 2; // Center the shelves
+
         for (let col = 0; col < cols; col++) {
-          const zPos = -roomSize / 2 + 2 + col * horizontalSpacing;
+          const zPos = startZ + col * horizontalSpacing;
 
           // Shelf
           const shelf = new THREE.Mesh(
@@ -323,7 +331,7 @@ export default function VaultPage() {
     // Create middle shelves (facing forward/backward)
     const createMiddleShelves = (): THREE.Group => {
       const shelfGroup = new THREE.Group();
-      const rows = shelfRows;
+      // FORCE 5 ROWS - ignore state for now to fix the issue
       const cols = Math.floor(shelfCols * 0.8); // Slightly fewer columns for middle
       const shelfWidth = 2.2; // Increased to fit larger slots
       const shelfDepth = 0.4; // Increased depth
@@ -331,15 +339,22 @@ export default function VaultPage() {
       const slotHeight = 0.45; // Increased height
       const slotDepth = 1.4; // Increased depth
 
-      // Calculate spacing to fit within room height
-      const maxShelfHeight = roomHeight - 1;
-      const verticalSpacing = Math.min(2.5, maxShelfHeight / (rows + 1));
+      // Calculate spacing to fit within room height - ensure all rows are visible
+      const bottomMargin = 0.5; // Space from floor
+      const topMargin = 1.0; // Space from ceiling
+      const availableHeight = roomHeight - bottomMargin - topMargin;
+      // Fixed spacing for 5 rows
+      const verticalSpacing = availableHeight / 4; // 5 rows means 4 gaps
       const horizontalSpacing = 1.8; // Increased spacing for larger bars
       const centerX = 0; // Middle of room
-      const startZ = -roomSize / 2 + 3; // Start a bit forward from back wall
 
-      for (let row = 0; row < rows; row++) {
-        const yPos = 1 + row * verticalSpacing;
+      // Center the shelves (not stuck to edges)
+      const totalShelfWidth = (cols - 1) * horizontalSpacing;
+      const startZ = -totalShelfWidth / 2; // Center the shelves
+
+      // Create exactly 5 rows
+      for (let row = 0; row < 5; row++) {
+        const yPos = bottomMargin + row * verticalSpacing;
 
         // LED light above shelf
         const ledLight = new THREE.PointLight(0xffffff, 0.5, 10);
@@ -732,37 +747,37 @@ export default function VaultPage() {
       },
     });
 
-    // Thief entry (0-1.5s)
+    // Thief entry (faster)
     tl.to(thief.position, {
       x: barPosition.x,
       y: barPosition.y + 1,
       z: barPosition.z,
-      duration: 1.5,
+      duration: 0.8,
       ease: "power2.out",
     });
 
-    // Bar theft (1.2-1.7s)
+    // Bar theft (faster)
     tl.to(
       targetBar.mesh.position,
       {
         y: barPosition.y + 1.5,
-        duration: 0.5,
+        duration: 0.3,
         ease: "back.out(1.7)",
       },
-      "-=0.3"
+      "-=0.2"
     );
 
-    // Exit (1.5-3.5s)
+    // Exit (faster)
     tl.to(
       [thief.position, targetBar.mesh.position],
       {
         x: 0,
         y: 12,
         z: 15,
-        duration: 2.0,
+        duration: 1.0,
         ease: "power3.in",
       },
-      "-=0.2"
+      "-=0.1"
     );
   };
 
