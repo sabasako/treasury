@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { gsap } from "gsap";
+import { PendingAnimationTransaction } from "@/app/vault/page";
 
 interface SlotMesh extends THREE.Mesh {
   slotIndex?: number;
@@ -23,6 +24,7 @@ interface GoldBar {
 const SHELF_ROWS = 5;
 const SHELF_COLS = 10;
 const TOTAL_BARS = 200;
+const BALANCE = 6000; // Current balance in USD (will be updated dynamically)
 const THIEF_ENTRY_DURATION = 1.5; // Thief entry animation duration (seconds)
 const THIEF_THEFT_DURATION = 0.6; // Bar theft animation duration (seconds)
 const THIEF_EXIT_DURATION = 1.8; // Thief exit animation duration (seconds)
@@ -31,11 +33,11 @@ const THIEF_EXIT_DURATION = 1.8; // Thief exit animation duration (seconds)
 export default function VaultRender({
   modelPath,
   pricePerBar,
-  raider,
+  notAnimatedTransactions = [],
 }: {
   modelPath: string;
   pricePerBar: number;
-  raider: string;
+  notAnimatedTransactions?: PendingAnimationTransaction[];
 }) {
   //   const modelPath =
   //     Math.random() > 0.5 ? "/models/kfc.glb" : "/models/mcdonalds.glb";
@@ -43,10 +45,17 @@ export default function VaultRender({
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Display state (doesn't trigger scene rebuild)
-  const [totalBars, setTotalBars] = useState(TOTAL_BARS); // Actual displayed count
+  const [currentBalance, setCurrentBalance] = useState(BALANCE); // Track balance in USD
+  const [totalBars, setTotalBars] = useState(Math.floor(BALANCE / pricePerBar)); // Calculate from balance
   const [isAnimating, setIsAnimating] = useState(false);
   const [showNotification, setShowNotification] = useState(false);
   const [notificationAmount, setNotificationAmount] = useState(0);
+  const [processedTransactionIds, setProcessedTransactionIds] = useState<
+    Set<number>
+  >(new Set());
+  const isAnimatingRef = useRef(false); // Ref to track animation state for async operations
+  const [sceneReady, setSceneReady] = useState(false); // Track when scene is initialized
+  const [modelReady, setModelReady] = useState(false); // Track when 3D model is loaded
 
   const sceneRef = useRef<{
     scene: THREE.Scene;
@@ -482,7 +491,8 @@ export default function VaultRender({
 
     // Gold bars - detailed design
     const goldBars: GoldBar[] = [];
-    const maxVisibleBars = totalBars;
+    const initialBars = Math.floor(BALANCE / pricePerBar);
+    const maxVisibleBars = Math.min(initialBars, TOTAL_BARS); // Don't exceed shelf capacity
 
     const createGoldBar = (position: THREE.Vector3): THREE.Group => {
       const barGroup = new THREE.Group();
@@ -705,22 +715,31 @@ export default function VaultRender({
         .then((model) => {
           if (model && sceneRef.current) {
             sceneRef.current.thiefModel = model;
+            setModelReady(true);
             console.log("✅ Thief model loaded and cached successfully");
           } else {
             console.error("Model loaded but sceneRef is null");
+            // If sceneRef is null, mark as ready anyway (will use fallback)
+            setModelReady(true);
           }
         })
         .catch((error) => {
           console.error("❌ Failed to load thief model:", error);
+          // Mark as ready even if loading failed (will use fallback)
+          setModelReady(true);
         });
     } else {
       console.log("No thief model path specified, using default primitive");
+      // No model path means we'll use fallback, so mark as ready
+      setModelReady(true);
     }
 
-    // Update display count to match actual bars created (deferred to avoid cascading renders)
-    setTimeout(() => {
-      setTotalBars(goldBars.length);
-    }, 0);
+    // Mark scene as ready
+    setSceneReady(true);
+    console.log("Scene initialized and ready for transactions");
+
+    // Don't override totalBars - keep it based on BALANCE
+    // The actual bars created may be limited by shelf capacity, but balance should reflect actual balance
 
     // Animation loop
     const animate = () => {
@@ -763,6 +782,77 @@ export default function VaultRender({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Scene only builds once on mount - config is in constants above
+
+  // Process transactions sequentially
+  useEffect(() => {
+    console.log("Transaction processing useEffect triggered", {
+      sceneReady,
+      modelReady,
+      hasScene: !!sceneRef.current,
+      transactionCount: notAnimatedTransactions?.length || 0,
+      transactions: notAnimatedTransactions,
+    });
+
+    // Don't process if scene or model isn't ready yet
+    if (!sceneReady || !modelReady || !sceneRef.current) {
+      console.log("Waiting for scene/model to be ready...", {
+        sceneReady,
+        modelReady,
+        hasScene: !!sceneRef.current,
+      });
+      return;
+    }
+
+    const processTransactions = async () => {
+      const unprocessed = notAnimatedTransactions.filter(
+        (tx) => !processedTransactionIds.has(tx.id)
+      );
+
+      if (unprocessed.length === 0) {
+        console.log("No unprocessed transactions");
+        return;
+      }
+
+      console.log(
+        "Processing transactions:",
+        unprocessed.length,
+        "Scene ready:",
+        sceneReady
+      );
+
+      for (const transaction of unprocessed) {
+        // Wait for any ongoing animation to finish
+        while (isAnimatingRef.current) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+
+        // Mark as processed
+        setProcessedTransactionIds((prev) => new Set(prev).add(transaction.id));
+
+        console.log(
+          "Starting heist for transaction:",
+          transaction.id,
+          "amount:",
+          transaction.amount
+        );
+
+        // Perform heist with transaction amount
+        await performHeist(transaction.amount);
+      }
+    };
+
+    // Start processing transactions when scene is ready and transactions exist
+    if (notAnimatedTransactions.length > 0) {
+      console.log(
+        "Transactions received:",
+        notAnimatedTransactions.length,
+        "Scene ready:",
+        sceneReady
+      );
+      processTransactions();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notAnimatedTransactions, sceneReady, modelReady]);
 
   const setEmergencyMode = (enabled: boolean) => {
     if (!sceneRef.current) return;
@@ -960,250 +1050,268 @@ export default function VaultRender({
     return sprite;
   };
 
-  const performHeist = () => {
-    if (
-      !sceneRef.current ||
-      isAnimating ||
-      sceneRef.current.goldBars.length === 0
-    )
-      return;
+  const performHeist = (amount: number): Promise<void> => {
+    return new Promise((resolve) => {
+      if (!sceneRef.current) {
+        console.warn("Scene not ready for heist");
+        resolve();
+        return;
+      }
 
-    setIsAnimating(true);
-    const { scene, goldBars } = sceneRef.current;
+      if (sceneRef.current.goldBars.length === 0) {
+        console.warn("No gold bars available for heist");
+        resolve();
+        return;
+      }
 
-    // Select random bar
-    const randomIndex = Math.floor(Math.random() * goldBars.length);
-    const targetBar = goldBars[randomIndex];
-    const barPosition = targetBar.mesh.position.clone();
+      console.log("Starting heist animation, amount:", amount);
+      setIsAnimating(true);
+      isAnimatingRef.current = true;
+      const { scene, goldBars } = sceneRef.current;
 
-    // Create thief - use 3D model if available, otherwise use fallback
-    let thief: THREE.Group;
+      // Select random bar
+      const randomIndex = Math.floor(Math.random() * goldBars.length);
+      const targetBar = goldBars[randomIndex];
+      const barPosition = targetBar.mesh.position.clone();
 
-    if (modelPath && sceneRef.current?.thiefModel) {
-      // Use cached loaded model
-      thief = sceneRef.current.thiefModel.clone();
-      console.log("Using loaded 3D model for thief");
-    } else if (modelPath) {
-      // Model path is set but model not loaded yet - try loading now
-      console.warn("Thief model not loaded yet, attempting to load now...");
-      // Use fallback for now, but try to load for next time
-      thief = createPrimitiveThief();
-      loadThiefModel(modelPath)
-        .then((model) => {
-          if (model && sceneRef.current) {
-            sceneRef.current.thiefModel = model;
-            console.log("Thief model loaded successfully");
-          }
-        })
-        .catch((error) => {
-          console.error("Failed to load thief model:", error);
+      // Create thief - use 3D model if available, otherwise use fallback
+      let thief: THREE.Group;
+
+      if (modelPath && sceneRef.current?.thiefModel) {
+        // Use cached loaded model
+        thief = sceneRef.current.thiefModel.clone();
+        console.log("Using loaded 3D model for thief");
+      } else if (modelPath) {
+        // Model path is set but model not loaded yet - try loading now
+        console.warn("Thief model not loaded yet, attempting to load now...");
+        // Use fallback for now, but try to load for next time
+        thief = createPrimitiveThief();
+        loadThiefModel(modelPath)
+          .then((model) => {
+            if (model && sceneRef.current) {
+              sceneRef.current.thiefModel = model;
+              console.log("Thief model loaded successfully");
+            }
+          })
+          .catch((error) => {
+            console.error("Failed to load thief model:", error);
+          });
+      } else {
+        // Use primitive fallback
+        thief = createPrimitiveThief();
+      }
+
+      function createPrimitiveThief(): THREE.Group {
+        const thiefGroup = new THREE.Group();
+
+        // Body (main torso)
+        const bodyGeometry = new THREE.BoxGeometry(0.6, 1.2, 0.4);
+        const bodyMaterial = new THREE.MeshStandardMaterial({
+          color: 0xff0000,
+          roughness: 0.7,
+          metalness: 0.1,
         });
-    } else {
-      // Use primitive fallback
-      thief = createPrimitiveThief();
-    }
+        const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+        body.position.set(0, 0.6, 0);
+        body.castShadow = true;
+        thiefGroup.add(body);
 
-    function createPrimitiveThief(): THREE.Group {
-      const thiefGroup = new THREE.Group();
+        // Head
+        const headGeometry = new THREE.SphereGeometry(0.3, 16, 16);
+        const headMaterial = new THREE.MeshStandardMaterial({
+          color: 0xffdbac,
+          roughness: 0.8,
+        });
+        const head = new THREE.Mesh(headGeometry, headMaterial);
+        head.position.set(0, 1.5, 0);
+        head.castShadow = true;
+        thiefGroup.add(head);
 
-      // Body (main torso)
-      const bodyGeometry = new THREE.BoxGeometry(0.6, 1.2, 0.4);
-      const bodyMaterial = new THREE.MeshStandardMaterial({
-        color: 0xff0000,
-        roughness: 0.7,
-        metalness: 0.1,
+        // Left arm
+        const leftArmGeometry = new THREE.BoxGeometry(0.2, 0.8, 0.2);
+        const leftArm = new THREE.Mesh(leftArmGeometry, bodyMaterial);
+        leftArm.position.set(-0.5, 0.6, 0);
+        leftArm.castShadow = true;
+        thiefGroup.add(leftArm);
+
+        // Right arm
+        const rightArmGeometry = new THREE.BoxGeometry(0.2, 0.8, 0.2);
+        const rightArm = new THREE.Mesh(rightArmGeometry, bodyMaterial);
+        rightArm.position.set(0.5, 0.6, 0);
+        rightArm.castShadow = true;
+        thiefGroup.add(rightArm);
+
+        // Left leg
+        const leftLegGeometry = new THREE.BoxGeometry(0.25, 0.9, 0.25);
+        const leftLeg = new THREE.Mesh(leftLegGeometry, bodyMaterial);
+        leftLeg.position.set(-0.2, -0.45, 0);
+        leftLeg.castShadow = true;
+        thiefGroup.add(leftLeg);
+
+        // Right leg
+        const rightLegGeometry = new THREE.BoxGeometry(0.25, 0.9, 0.25);
+        const rightLeg = new THREE.Mesh(rightLegGeometry, bodyMaterial);
+        rightLeg.position.set(0.2, -0.45, 0);
+        rightLeg.castShadow = true;
+        thiefGroup.add(rightLeg);
+
+        const badgeGeometry = new THREE.PlaneGeometry(0.3, 0.3);
+        const badgeMaterial = new THREE.MeshStandardMaterial({
+          color: 0xffc72c,
+          emissive: 0xffc72c,
+          emissiveIntensity: 0.5,
+          side: THREE.DoubleSide,
+        });
+        const badge = new THREE.Mesh(badgeGeometry, badgeMaterial);
+        badge.position.set(0, 0.6, 0.21);
+        badge.rotation.x = -Math.PI / 2;
+        thiefGroup.add(badge);
+
+        // Add simple M symbol (using boxes to form an M shape)
+        const mPart1 = new THREE.Mesh(
+          new THREE.BoxGeometry(0.02, 0.15, 0.01),
+          new THREE.MeshBasicMaterial({ color: 0x000000 })
+        );
+        mPart1.position.set(-0.08, 0.6, 0.22);
+        thiefGroup.add(mPart1);
+
+        const mPart2 = new THREE.Mesh(
+          new THREE.BoxGeometry(0.02, 0.15, 0.01),
+          new THREE.MeshBasicMaterial({ color: 0x000000 })
+        );
+        mPart2.position.set(0.08, 0.6, 0.22);
+        thiefGroup.add(mPart2);
+
+        const mPart3 = new THREE.Mesh(
+          new THREE.BoxGeometry(0.12, 0.02, 0.01),
+          new THREE.MeshBasicMaterial({ color: 0x000000 })
+        );
+        mPart3.position.set(0, 0.52, 0.22);
+        mPart3.rotation.z = Math.PI / 4;
+        thiefGroup.add(mPart3);
+
+        return thiefGroup;
+      }
+
+      // Model should be preloaded in useEffect, but if not, log a warning
+      if (modelPath && !sceneRef.current?.thiefModel) {
+        console.warn(
+          "Thief model not yet loaded, using fallback. Model may still be loading."
+        );
+      }
+
+      thief.position.set(0, 8, 10);
+      thief.castShadow = true;
+      scene.add(thief);
+
+      // Create and add price label above thief (use transaction amount)
+      const priceLabel = createPriceLabel(amount);
+      priceLabel.position.set(0, 8 + 2.5, 10); // Position above thief
+      scene.add(priceLabel);
+
+      if (sceneRef.current) {
+        sceneRef.current.thief = thief;
+        sceneRef.current.priceLabel = priceLabel;
+      }
+
+      // Show notification
+      setNotificationAmount(amount);
+      setShowNotification(true);
+
+      // Activate emergency mode
+      setEmergencyMode(true);
+
+      // Animation timeline
+      const tl = gsap.timeline({
+        onComplete: () => {
+          // Remove thief, price label, and bar
+          scene.remove(thief);
+          if (priceLabel) scene.remove(priceLabel);
+          scene.remove(targetBar.mesh);
+          delete sceneRef.current!.thief;
+          delete sceneRef.current!.priceLabel;
+
+          // Remove from array
+          goldBars.splice(randomIndex, 1);
+
+          // Update UI - subtract exact amount from balance, then recalculate bars
+          setCurrentBalance((prevBalance) => {
+            const newBalance = Math.max(0, prevBalance - amount);
+            const newBars = Math.floor(newBalance / pricePerBar);
+            setTotalBars(newBars);
+            return newBalance;
+          });
+
+          // Restore normal mode
+          setEmergencyMode(false);
+          setShowNotification(false);
+          setIsAnimating(false);
+          isAnimatingRef.current = false;
+
+          // Resolve promise to continue with next transaction
+          resolve();
+        },
       });
-      const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-      body.position.set(0, 0.6, 0);
-      body.castShadow = true;
-      thiefGroup.add(body);
 
-      // Head
-      const headGeometry = new THREE.SphereGeometry(0.3, 16, 16);
-      const headMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffdbac,
-        roughness: 0.8,
-      });
-      const head = new THREE.Mesh(headGeometry, headMaterial);
-      head.position.set(0, 1.5, 0);
-      head.castShadow = true;
-      thiefGroup.add(head);
-
-      // Left arm
-      const leftArmGeometry = new THREE.BoxGeometry(0.2, 0.8, 0.2);
-      const leftArm = new THREE.Mesh(leftArmGeometry, bodyMaterial);
-      leftArm.position.set(-0.5, 0.6, 0);
-      leftArm.castShadow = true;
-      thiefGroup.add(leftArm);
-
-      // Right arm
-      const rightArmGeometry = new THREE.BoxGeometry(0.2, 0.8, 0.2);
-      const rightArm = new THREE.Mesh(rightArmGeometry, bodyMaterial);
-      rightArm.position.set(0.5, 0.6, 0);
-      rightArm.castShadow = true;
-      thiefGroup.add(rightArm);
-
-      // Left leg
-      const leftLegGeometry = new THREE.BoxGeometry(0.25, 0.9, 0.25);
-      const leftLeg = new THREE.Mesh(leftLegGeometry, bodyMaterial);
-      leftLeg.position.set(-0.2, -0.45, 0);
-      leftLeg.castShadow = true;
-      thiefGroup.add(leftLeg);
-
-      // Right leg
-      const rightLegGeometry = new THREE.BoxGeometry(0.25, 0.9, 0.25);
-      const rightLeg = new THREE.Mesh(rightLegGeometry, bodyMaterial);
-      rightLeg.position.set(0.2, -0.45, 0);
-      rightLeg.castShadow = true;
-      thiefGroup.add(rightLeg);
-
-      const badgeGeometry = new THREE.PlaneGeometry(0.3, 0.3);
-      const badgeMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffc72c,
-        emissive: 0xffc72c,
-        emissiveIntensity: 0.5,
-        side: THREE.DoubleSide,
-      });
-      const badge = new THREE.Mesh(badgeGeometry, badgeMaterial);
-      badge.position.set(0, 0.6, 0.21);
-      badge.rotation.x = -Math.PI / 2;
-      thiefGroup.add(badge);
-
-      // Add simple M symbol (using boxes to form an M shape)
-      const mPart1 = new THREE.Mesh(
-        new THREE.BoxGeometry(0.02, 0.15, 0.01),
-        new THREE.MeshBasicMaterial({ color: 0x000000 })
-      );
-      mPart1.position.set(-0.08, 0.6, 0.22);
-      thiefGroup.add(mPart1);
-
-      const mPart2 = new THREE.Mesh(
-        new THREE.BoxGeometry(0.02, 0.15, 0.01),
-        new THREE.MeshBasicMaterial({ color: 0x000000 })
-      );
-      mPart2.position.set(0.08, 0.6, 0.22);
-      thiefGroup.add(mPart2);
-
-      const mPart3 = new THREE.Mesh(
-        new THREE.BoxGeometry(0.12, 0.02, 0.01),
-        new THREE.MeshBasicMaterial({ color: 0x000000 })
-      );
-      mPart3.position.set(0, 0.52, 0.22);
-      mPart3.rotation.z = Math.PI / 4;
-      thiefGroup.add(mPart3);
-
-      return thiefGroup;
-    }
-
-    // Model should be preloaded in useEffect, but if not, log a warning
-    if (modelPath && !sceneRef.current?.thiefModel) {
-      console.warn(
-        "Thief model not yet loaded, using fallback. Model may still be loading."
-      );
-    }
-
-    thief.position.set(0, 8, 10);
-    thief.castShadow = true;
-    scene.add(thief);
-
-    // Create and add price label above thief
-    const priceLabel = createPriceLabel(pricePerBar);
-    priceLabel.position.set(0, 8 + 2.5, 10); // Position above thief
-    scene.add(priceLabel);
-
-    if (sceneRef.current) {
-      sceneRef.current.thief = thief;
-      sceneRef.current.priceLabel = priceLabel;
-    }
-
-    // Show notification
-    setNotificationAmount(pricePerBar);
-    setShowNotification(true);
-
-    // Activate emergency mode
-    setEmergencyMode(true);
-
-    // Animation timeline
-    const tl = gsap.timeline({
-      onComplete: () => {
-        // Remove thief, price label, and bar
-        scene.remove(thief);
-        if (priceLabel) scene.remove(priceLabel);
-        scene.remove(targetBar.mesh);
-        delete sceneRef.current!.thief;
-        delete sceneRef.current!.priceLabel;
-
-        // Remove from array
-        goldBars.splice(randomIndex, 1);
-
-        // Update UI
-        setTotalBars((prev) => Math.max(0, prev - 1));
-
-        // Restore normal mode
-        setEmergencyMode(false);
-        setShowNotification(false);
-        setIsAnimating(false);
-      },
-    });
-
-    // Thief entry (slower) - animate thief and price label together
-    const thiefPos = {
-      x: thief.position.x,
-      y: thief.position.y,
-      z: thief.position.z,
-    };
-    tl.to(thiefPos, {
-      x: barPosition.x,
-      y: barPosition.y + 1,
-      z: barPosition.z,
-      duration: THIEF_ENTRY_DURATION,
-      ease: "power2.out",
-      onUpdate: function () {
-        thief.position.set(thiefPos.x, thiefPos.y, thiefPos.z);
-        priceLabel.position.set(thiefPos.x, thiefPos.y + 2.5, thiefPos.z);
-      },
-    });
-
-    // Bar theft (slower)
-    tl.to(
-      targetBar.mesh.position,
-      {
-        y: barPosition.y + 1.5,
-        duration: THIEF_THEFT_DURATION,
-        ease: "back.out(1.7)",
-      },
-      "-=0.3"
-    );
-
-    // Exit (slower) - animate thief, price label, and bar together
-    tl.to(
-      thiefPos,
-      {
-        x: 0,
-        y: 12,
-        z: 15,
-        duration: THIEF_EXIT_DURATION,
-        ease: "power3.in",
+      // Thief entry (slower) - animate thief and price label together
+      const thiefPos = {
+        x: thief.position.x,
+        y: thief.position.y,
+        z: thief.position.z,
+      };
+      tl.to(thiefPos, {
+        x: barPosition.x,
+        y: barPosition.y + 1,
+        z: barPosition.z,
+        duration: THIEF_ENTRY_DURATION,
+        ease: "power2.out",
         onUpdate: function () {
           thief.position.set(thiefPos.x, thiefPos.y, thiefPos.z);
           priceLabel.position.set(thiefPos.x, thiefPos.y + 2.5, thiefPos.z);
         },
-      },
-      "-=0.2"
-    );
+      });
 
-    // Also animate the bar position
-    tl.to(
-      targetBar.mesh.position,
-      {
-        x: 0,
-        y: 12,
-        z: 15,
-        duration: THIEF_EXIT_DURATION,
-        ease: "power3.in",
-      },
-      "-=" + THIEF_EXIT_DURATION
-    );
+      // Bar theft (slower)
+      tl.to(
+        targetBar.mesh.position,
+        {
+          y: barPosition.y + 1.5,
+          duration: THIEF_THEFT_DURATION,
+          ease: "back.out(1.7)",
+        },
+        "-=0.3"
+      );
+
+      // Exit (slower) - animate thief, price label, and bar together
+      tl.to(
+        thiefPos,
+        {
+          x: 0,
+          y: 12,
+          z: 15,
+          duration: THIEF_EXIT_DURATION,
+          ease: "power3.in",
+          onUpdate: function () {
+            thief.position.set(thiefPos.x, thiefPos.y, thiefPos.z);
+            priceLabel.position.set(thiefPos.x, thiefPos.y + 2.5, thiefPos.z);
+          },
+        },
+        "-=0.2"
+      );
+
+      // Also animate the bar position
+      tl.to(
+        targetBar.mesh.position,
+        {
+          x: 0,
+          y: 12,
+          z: 15,
+          duration: THIEF_EXIT_DURATION,
+          ease: "power3.in",
+        },
+        "-=" + THIEF_EXIT_DURATION
+      );
+    });
   };
 
   const formatCurrency = (value: number): string => {
@@ -1211,14 +1319,15 @@ export default function VaultRender({
   };
 
   const getWealthColor = (): string => {
-    if (totalBars === 0) return "#ff4757";
-    if (totalBars < 20) return "#ff9500";
+    if (currentBalance <= 0) return "#ff4757";
+    const barsValue = 20 * pricePerBar; // 20 bars worth
+    if (currentBalance < barsValue) return "#ff9500";
     return "#ffd700";
   };
 
   const getWealthText = (): string => {
-    if (totalBars === 0) return "BANKRUPT";
-    return formatCurrency(totalBars * pricePerBar);
+    if (currentBalance <= 0) return "BANKRUPT";
+    return formatCurrency(currentBalance);
   };
 
   return (
@@ -1277,7 +1386,7 @@ export default function VaultRender({
             🍔
           </button>
           <button
-            onClick={performHeist}
+            onClick={() => performHeist(pricePerBar)}
             disabled={isAnimating || totalBars === 0}
             className="px-6 py-2 rounded-full hover:bg-white/10 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             style={{
