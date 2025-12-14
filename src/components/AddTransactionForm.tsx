@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { motion } from "motion/react";
-import { Plus, CheckCircle2 } from "lucide-react";
+import { Plus } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -22,7 +22,6 @@ export function AddTransactionForm({
 }: AddTransactionFormProps) {
   const [receiver, setReceiver] = useState("");
   const [amount, setAmount] = useState("");
-  const [showSuccess, setShowSuccess] = useState(false);
   const [loading, setLoading] = useState(false); // 🔹 loading state
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -37,19 +36,24 @@ export function AddTransactionForm({
         isAnimated: false,
       });
 
-      setShowSuccess(true);
+      toast.success("Payment recorded successfully!", {
+        description: `$${Number(amount).toFixed(2)} to ${receiver}`,
+      });
+
       setReceiver("");
       setAmount("");
-      setTimeout(() => setShowSuccess(false), 2000);
     } catch (err) {
       console.error("Transaction failed:", err);
+      toast.error("Failed to record payment", {
+        description: err instanceof Error ? err.message : "Please try again",
+      });
     } finally {
       setLoading(false); // 🔹 re-enable button
     }
   };
 
   return (
-    <Card className="relative overflow-hidden">
+    <Card>
       <CardHeader>
         <CardTitle>Add Transaction</CardTitle>
       </CardHeader>
@@ -58,7 +62,7 @@ export function AddTransactionForm({
           <div>
             <Label>Receiver name</Label>
             <Input
-              placeholder="McDonalds / HolyCrusad"
+              placeholder="mcdonalds / kfc / heineken"
               value={receiver}
               onChange={(e) => setReceiver(e.target.value)}
               required
@@ -81,25 +85,15 @@ export function AddTransactionForm({
 
           <Button className="w-full" disabled={loading}>
             {loading ? (
-              "Sending..."
+              "Recording..."
             ) : (
               <>
-                <Plus className="mr-2 h-4 w-4" /> Send Money
+                <Plus className="mr-2 h-4 w-4" /> Record Payment
               </>
             )}
           </Button>
         </form>
       </CardContent>
-
-      {showSuccess && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="absolute inset-0 bg-green-500/95 flex items-center justify-center"
-        >
-          <CheckCircle2 className="h-24 w-24 text-white" />
-        </motion.div>
-      )}
     </Card>
   );
 }

@@ -27,15 +27,26 @@ const TOTAL_BARS = 200;
 const THIEF_ENTRY_DURATION = 1.5; // Thief entry animation duration (seconds)
 const THIEF_THEFT_DURATION = 0.6; // Bar theft animation duration (seconds)
 const THIEF_EXIT_DURATION = 1.8; // Thief exit animation duration (seconds)
+
+// Map receiver usernames to their 3D models
+const RECEIVER_MODEL_MAP: Record<string, string> = {
+  heineken: "/models/beer.glb",
+  kfc: "/models/kfc.glb",
+  mcdonalds: "/models/mcdonalds.glb",
+};
+
+// Get model path based on receiver username, returns empty string for default
+function getModelPathForReceiver(receiverUsername: string): string {
+  const normalized = receiverUsername.trim();
+  return RECEIVER_MODEL_MAP[normalized] || "";
+}
 // ============================================================================
 
 export default function VaultRender({
-  modelPath,
   pricePerBar,
   notAnimatedTransactions = [],
   user,
 }: {
-  modelPath: string;
   pricePerBar: number;
   notAnimatedTransactions?: PendingAnimationTransaction[];
   user: User;
@@ -54,6 +65,7 @@ export default function VaultRender({
     Set<number>
   >(new Set());
   const isAnimatingRef = useRef(false); // Ref to track animation state for async operations
+  const hasUpdatedAnimationsRef = useRef<Set<number>>(new Set()); // Track which transaction IDs have been sent to API
   const [sceneReady, setSceneReady] = useState(false); // Track when scene is initialized
   const [modelReady, setModelReady] = useState(false); // Track when 3D model is loaded
 
@@ -71,7 +83,7 @@ export default function VaultRender({
     godRayLight: THREE.SpotLight;
     ambientLight: THREE.HemisphereLight;
     thief?: THREE.Group;
-    thiefModel?: THREE.Group; // Cached loaded model
+    thiefModels?: Map<string, THREE.Group>; // Cached loaded models by receiver username
     priceLabel?: THREE.Sprite; // Price label above thief
   } | null>(null);
 
@@ -708,29 +720,52 @@ export default function VaultRender({
       ambientLight,
     };
 
-    // Preload thief model if path is provided
-    if (modelPath) {
-      console.log("Preloading thief model from:", modelPath);
-      loadThiefModel(modelPath)
-        .then((model) => {
-          if (model && sceneRef.current) {
-            sceneRef.current.thiefModel = model;
+    // Preload all unique models from transactions
+    if (notAnimatedTransactions.length > 0) {
+      const uniqueReceivers = new Set(
+        notAnimatedTransactions.map((tx) => tx.receiverUsername)
+      );
+      const modelsToLoad: Array<{ receiver: string; path: string }> = [];
+
+      uniqueReceivers.forEach((receiver) => {
+        const modelPath = getModelPathForReceiver(receiver);
+        if (modelPath) {
+          modelsToLoad.push({ receiver, path: modelPath });
+        }
+      });
+
+      if (modelsToLoad.length > 0) {
+        console.log("Preloading models for receivers:", modelsToLoad);
+        const loadPromises = modelsToLoad.map(({ receiver, path }) =>
+          loadThiefModel(path)
+            .then((model) => {
+              if (model && sceneRef.current) {
+                if (!sceneRef.current.thiefModels) {
+                  sceneRef.current.thiefModels = new Map();
+                }
+                sceneRef.current.thiefModels.set(receiver, model);
+                console.log(`✅ Model loaded for ${receiver}:`, path);
+              }
+            })
+            .catch((error) => {
+              console.error(`❌ Failed to load model for ${receiver}:`, error);
+            })
+        );
+
+        Promise.all(loadPromises)
+          .then(() => {
             setModelReady(true);
-            console.log("✅ Thief model loaded and cached successfully");
-          } else {
-            console.error("Model loaded but sceneRef is null");
-            // If sceneRef is null, mark as ready anyway (will use fallback)
+            console.log("All models preloaded");
+          })
+          .catch(() => {
             setModelReady(true);
-          }
-        })
-        .catch((error) => {
-          console.error("❌ Failed to load thief model:", error);
-          // Mark as ready even if loading failed (will use fallback)
-          setModelReady(true);
-        });
+          });
+      } else {
+        console.log("No models to preload, using default primitive");
+        setModelReady(true);
+      }
     } else {
-      console.log("No thief model path specified, using default primitive");
-      // No model path means we'll use fallback, so mark as ready
+      // No transactions, mark as ready
       setModelReady(true);
     }
 
@@ -820,6 +855,8 @@ export default function VaultRender({
         sceneReady
       );
 
+      const processedIds: number[] = [];
+
       for (const transaction of unprocessed) {
         // Wait for any ongoing animation to finish
         while (isAnimatingRef.current) {
@@ -828,16 +865,134 @@ export default function VaultRender({
 
         // Mark as processed
         setProcessedTransactionIds((prev) => new Set(prev).add(transaction.id));
+        processedIds.push(transaction.id);
 
         console.log(
           "Starting heist for transaction:",
           transaction.id,
           "amount:",
-          transaction.amount
+          transaction.amount,
+          "receiver:",
+          transaction.receiverUsername
         );
 
-        // Perform heist with transaction amount
-        await performHeist(transaction.amount);
+        // Perform heist with transaction amount and receiver username
+        await performHeist(transaction.amount, transaction.receiverUsername);
+      }
+
+      // After all animations are complete, update the API
+      if (processedIds.length > 0) {
+        // Filter out IDs that have already been sent to API
+        const idsToUpdate = processedIds.filter(
+          (id) => !hasUpdatedAnimationsRef.current.has(id)
+        );
+
+        if (idsToUpdate.length > 0) {
+          try {
+            const token = localStorage.getItem("token");
+            if (!token) {
+              console.error("No authentication token found");
+              return;
+            }
+
+            console.log("Updating animations for transactions:", idsToUpdate);
+            const apiBase =
+              process.env.NEXT_PUBLIC_API_BASE ||
+              "https://api20251214042652-egcaeahhd3hde7gq.canadacentral-01.azurewebsites.net";
+            const apiUrl = `${apiBase}/api/Transaction/update-animations`;
+            console.log("API URL:", apiUrl);
+
+            // API expects UpdateAnimationDto with transactionIds and isAnimated
+            const requestBody = {
+              transactionIds: idsToUpdate,
+              isAnimated: true,
+            };
+            console.log("Request body:", JSON.stringify(requestBody));
+
+            const response = await fetch(apiUrl, {
+              method: "PUT",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify(requestBody),
+            });
+
+            console.log(
+              "API Response status:",
+              response.status,
+              response.statusText
+            );
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              console.error("API Error response:", errorText);
+
+              // Try alternative format if first attempt fails
+              if (response.status === 400) {
+                console.log("Trying alternative request format...");
+                const altRequestBody = {
+                  transactionIds: idsToUpdate,
+                  isAnimated: true,
+                };
+                const altResponse = await fetch(apiUrl, {
+                  method: "PUT",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                  },
+                  body: JSON.stringify(altRequestBody),
+                });
+
+                if (altResponse.ok) {
+                  console.log("Alternative format worked!");
+                  const altResponseData = await altResponse
+                    .json()
+                    .catch(() => null);
+                  console.log("API Response data:", altResponseData);
+                  idsToUpdate.forEach((id) =>
+                    hasUpdatedAnimationsRef.current.add(id)
+                  );
+                  console.log(
+                    "Successfully updated animations for transactions:",
+                    idsToUpdate
+                  );
+                  return; // Success with alternative format
+                } else {
+                  const altErrorText = await altResponse.text();
+                  console.error(
+                    "Alternative format also failed:",
+                    altErrorText
+                  );
+                }
+              }
+
+              throw new Error(
+                `Failed to update animations: ${response.status} ${response.statusText} - ${errorText}`
+              );
+            }
+
+            const responseData = await response.json().catch(() => null);
+            console.log("API Response data:", responseData);
+
+            // Mark these IDs as updated
+            idsToUpdate.forEach((id) =>
+              hasUpdatedAnimationsRef.current.add(id)
+            );
+
+            console.log(
+              "Successfully updated animations for transactions:",
+              idsToUpdate
+            );
+          } catch (error) {
+            console.error("Error updating animations:", error);
+            if (error instanceof Error) {
+              console.error("Error details:", error.message, error.stack);
+            }
+          }
+        } else {
+          console.log("All transaction IDs have already been sent to API");
+        }
       }
     };
 
@@ -1050,7 +1205,10 @@ export default function VaultRender({
     return sprite;
   };
 
-  const performHeist = (amount: number): Promise<void> => {
+  const performHeist = (
+    amount: number,
+    receiverUsername: string
+  ): Promise<void> => {
     return new Promise((resolve) => {
       if (!sceneRef.current) {
         console.warn("Scene not ready for heist");
@@ -1076,28 +1234,45 @@ export default function VaultRender({
 
       // Create thief - use 3D model if available, otherwise use fallback
       let thief: THREE.Group;
+      const modelPath = getModelPathForReceiver(receiverUsername);
 
-      if (modelPath && sceneRef.current?.thiefModel) {
-        // Use cached loaded model
-        thief = sceneRef.current.thiefModel.clone();
-        console.log("Using loaded 3D model for thief");
+      if (modelPath && sceneRef.current?.thiefModels?.has(receiverUsername)) {
+        // Use cached loaded model for this receiver
+        const cachedModel = sceneRef.current.thiefModels.get(receiverUsername);
+        if (cachedModel) {
+          thief = cachedModel.clone();
+          console.log(`Using loaded 3D model for ${receiverUsername}`);
+        } else {
+          thief = createPrimitiveThief();
+        }
       } else if (modelPath) {
         // Model path is set but model not loaded yet - try loading now
-        console.warn("Thief model not loaded yet, attempting to load now...");
+        console.warn(
+          `Model for ${receiverUsername} not loaded yet, attempting to load now...`
+        );
         // Use fallback for now, but try to load for next time
         thief = createPrimitiveThief();
         loadThiefModel(modelPath)
           .then((model) => {
             if (model && sceneRef.current) {
-              sceneRef.current.thiefModel = model;
-              console.log("Thief model loaded successfully");
+              if (!sceneRef.current.thiefModels) {
+                sceneRef.current.thiefModels = new Map();
+              }
+              sceneRef.current.thiefModels.set(receiverUsername, model);
+              console.log(`Model loaded successfully for ${receiverUsername}`);
             }
           })
           .catch((error) => {
-            console.error("Failed to load thief model:", error);
+            console.error(
+              `Failed to load model for ${receiverUsername}:`,
+              error
+            );
           });
       } else {
-        // Use primitive fallback
+        // No model path for this receiver, use primitive fallback
+        console.log(
+          `No model mapping for ${receiverUsername}, using default primitive`
+        );
         thief = createPrimitiveThief();
       }
 
@@ -1194,9 +1369,9 @@ export default function VaultRender({
       }
 
       // Model should be preloaded in useEffect, but if not, log a warning
-      if (modelPath && !sceneRef.current?.thiefModel) {
+      if (modelPath && !sceneRef.current?.thiefModels?.has(receiverUsername)) {
         console.warn(
-          "Thief model not yet loaded, using fallback. Model may still be loading."
+          `Model for ${receiverUsername} not yet loaded, using fallback. Model may still be loading.`
         );
       }
 
@@ -1369,7 +1544,7 @@ export default function VaultRender({
       </div>
 
       {/* Bottom Bar - Controls */}
-      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10">
+      {/* <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10">
         <div
           className="px-6 py-3 rounded-[50px] backdrop-blur-[20px] flex items-center gap-4"
           style={{
@@ -1386,7 +1561,7 @@ export default function VaultRender({
             🍔
           </button>
           <button
-            onClick={() => performHeist(pricePerBar)}
+            onClick={() => performHeist(pricePerBar, "McDonalds")}
             disabled={isAnimating || totalBars === 0}
             className="px-6 py-2 rounded-full hover:bg-white/10 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             style={{
@@ -1405,7 +1580,7 @@ export default function VaultRender({
             📋
           </button>
         </div>
-      </div>
+      </div> */}
 
       {/* Notification */}
       {/* {showNotification && (

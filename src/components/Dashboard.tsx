@@ -49,7 +49,7 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
       if (!Array.isArray(txs)) throw new Error("Invalid transactions response");
 
       setTransactions(
-        txs.map((t: any) => ({
+        txs.map((t) => ({
           id: t.id,
           senderUsername: t.senderUsername,
           receiverUsername: t.receiverUsername,
@@ -94,7 +94,16 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
     }
   };
 
-  if (loading) return <div className="p-8">Loading dashboard...</div>;
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
