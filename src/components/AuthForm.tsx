@@ -57,7 +57,8 @@ export function AuthForm({
         toast.success("Logged in successfully");
 
         // TODO: store token if returned
-        localStorage.setItem("token", data.token.result);
+        localStorage.setItem("token", data.token);
+        localStorage.setItem("username", userName);
         onLogin(userName, password);
       } else {
         // RegisterUserDto

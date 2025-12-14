@@ -23,29 +23,35 @@ export function AddTransactionForm({
   const [receiver, setReceiver] = useState("");
   const [amount, setAmount] = useState("");
   const [showSuccess, setShowSuccess] = useState(false);
+  const [loading, setLoading] = useState(false); // 🔹 loading state
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return; // prevent double click
 
-    if (!receiver || !amount) return;
+    setLoading(true);
+    try {
+      await onAddTransaction({
+        receiverUsername: receiver,
+        amount: Number(amount),
+        isAnimated: false,
+      });
 
-    await onAddTransaction({
-      receiverUsername: receiver,
-      amount: Number(amount),
-      isAnimated: false,
-    });
-
-    setShowSuccess(true);
-    setReceiver("");
-    setAmount("");
-
-    setTimeout(() => setShowSuccess(false), 2000);
+      setShowSuccess(true);
+      setReceiver("");
+      setAmount("");
+      setTimeout(() => setShowSuccess(false), 2000);
+    } catch (err) {
+      console.error("Transaction failed:", err);
+    } finally {
+      setLoading(false); // 🔹 re-enable button
+    }
   };
 
   return (
     <Card className="relative overflow-hidden">
       <CardHeader>
-        <CardTitle>Send Money</CardTitle>
+        <CardTitle>Add Transaction</CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -56,6 +62,7 @@ export function AddTransactionForm({
               value={receiver}
               onChange={(e) => setReceiver(e.target.value)}
               required
+              disabled={loading} // 🔹 disable while loading
             />
           </div>
 
@@ -68,12 +75,18 @@ export function AddTransactionForm({
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               required
+              disabled={loading} // 🔹 disable while loading
             />
           </div>
 
-          <Button className="w-full">
-            <Plus className="mr-2 h-4 w-4" />
-            Send Money
+          <Button className="w-full" disabled={loading}>
+            {loading ? (
+              "Sending..."
+            ) : (
+              <>
+                <Plus className="mr-2 h-4 w-4" /> Send Money
+              </>
+            )}
           </Button>
         </form>
       </CardContent>
