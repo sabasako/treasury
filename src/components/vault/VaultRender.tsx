@@ -12,7 +12,7 @@ interface SlotMesh extends THREE.Mesh {
 }
 
 interface GoldBar {
-  mesh: THREE.Mesh;
+  mesh: THREE.Mesh | THREE.Group;
   slotIndex: number;
   slot: THREE.Mesh;
 }
@@ -37,6 +37,9 @@ export default function VaultRender({
   pricePerBar: number;
   raider: string;
 }) {
+  //   const modelPath =
+  //     Math.random() > 0.5 ? "/models/kfc.glb" : "/models/mcdonalds.glb";
+
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Display state (doesn't trigger scene rebuild)
@@ -60,6 +63,7 @@ export default function VaultRender({
     ambientLight: THREE.HemisphereLight;
     thief?: THREE.Group;
     thiefModel?: THREE.Group; // Cached loaded model
+    priceLabel?: THREE.Sprite; // Price label above thief
   } | null>(null);
 
   // Load thief model function
@@ -476,25 +480,149 @@ export default function VaultRender({
       }
     });
 
-    // Gold bars - increased size
+    // Gold bars - detailed design
     const goldBars: GoldBar[] = [];
-    const goldBarGeometry = new THREE.BoxGeometry(2.0, 0.8, 1.2); // Increased: 2.0×0.8×1.2
     const maxVisibleBars = totalBars;
 
-    const createGoldBar = (position: THREE.Vector3): THREE.Mesh => {
+    const createGoldBar = (position: THREE.Vector3): THREE.Group => {
+      const barGroup = new THREE.Group();
+
+      // Main bar dimensions
+      const barWidth = 2.0;
+      const barHeight = 0.8;
+      const barDepth = 1.2;
+      const bevelSize = 0.05; // Size of beveled edges
+
+      // Base gold material
       const goldMaterial = new THREE.MeshStandardMaterial({
         color: new THREE.Color().setHSL(0.12, 1.0, 0.5 + Math.random() * 0.1),
-        metalness: 0.95,
-        roughness: 0.1,
+        metalness: 0.98,
+        roughness: 0.15,
         emissive: new THREE.Color(0xffd700),
-        emissiveIntensity: 0.1,
+        emissiveIntensity: 0.08,
       });
 
-      const bar = new THREE.Mesh(goldBarGeometry, goldMaterial);
-      bar.position.copy(position);
-      bar.castShadow = true;
-      bar.receiveShadow = true;
-      return bar;
+      // Main body with beveled top edges
+      const mainBody = new THREE.Mesh(
+        new THREE.BoxGeometry(barWidth, barHeight - bevelSize * 2, barDepth),
+        goldMaterial
+      );
+      mainBody.position.y = -bevelSize;
+      mainBody.castShadow = true;
+      mainBody.receiveShadow = true;
+      barGroup.add(mainBody);
+
+      // Top face with beveled edges (trapezoid shape)
+      const topFaceGeometry = new THREE.BufferGeometry();
+      const topVertices = new Float32Array([
+        // Bottom face vertices (wider)
+        -barWidth / 2,
+        barHeight / 2 - bevelSize,
+        -barDepth / 2,
+        barWidth / 2,
+        barHeight / 2 - bevelSize,
+        -barDepth / 2,
+        barWidth / 2,
+        barHeight / 2 - bevelSize,
+        barDepth / 2,
+        -barWidth / 2,
+        barHeight / 2 - bevelSize,
+        barDepth / 2,
+        // Top face vertices (narrower - beveled)
+        -barWidth / 2 + bevelSize,
+        barHeight / 2,
+        -barDepth / 2 + bevelSize,
+        barWidth / 2 - bevelSize,
+        barHeight / 2,
+        -barDepth / 2 + bevelSize,
+        barWidth / 2 - bevelSize,
+        barHeight / 2,
+        barDepth / 2 - bevelSize,
+        -barWidth / 2 + bevelSize,
+        barHeight / 2,
+        barDepth / 2 - bevelSize,
+      ]);
+      topFaceGeometry.setAttribute(
+        "position",
+        new THREE.BufferAttribute(topVertices, 3)
+      );
+
+      // Create faces for the beveled top
+      const topIndices = new Uint16Array([
+        // Bottom face
+        0, 1, 2, 0, 2, 3,
+        // Top face
+        4, 7, 6, 4, 6, 5,
+        // Side faces (bevels)
+        0, 4, 5, 0, 5, 1, 1, 5, 6, 1, 6, 2, 2, 6, 7, 2, 7, 3, 3, 7, 4, 3, 4, 0,
+      ]);
+      topFaceGeometry.setIndex(new THREE.BufferAttribute(topIndices, 1));
+      topFaceGeometry.computeVertexNormals();
+
+      const topFace = new THREE.Mesh(topFaceGeometry, goldMaterial);
+      topFace.castShadow = true;
+      topFace.receiveShadow = true;
+      barGroup.add(topFace);
+
+      // Engraved details on top face - serial number and purity marks
+      const engravingMaterial = new THREE.MeshStandardMaterial({
+        color: new THREE.Color().setHSL(0.12, 0.8, 0.3), // Darker gold for engravings
+        metalness: 0.9,
+        roughness: 0.3,
+        emissive: new THREE.Color(0xffd700),
+        emissiveIntensity: 0.02,
+      });
+
+      // Serial number text area (simplified as a rectangle)
+      const serialNumber = new THREE.Mesh(
+        new THREE.PlaneGeometry(barWidth * 0.6, barHeight * 0.15),
+        engravingMaterial
+      );
+      serialNumber.position.set(0, barHeight / 2 + 0.001, 0);
+      serialNumber.rotation.x = -Math.PI / 2;
+      barGroup.add(serialNumber);
+
+      // Purity mark (999.9 or similar)
+      const purityMark = new THREE.Mesh(
+        new THREE.PlaneGeometry(barWidth * 0.3, barHeight * 0.1),
+        engravingMaterial
+      );
+      purityMark.position.set(0, barHeight / 2 + 0.001, barDepth * 0.3);
+      purityMark.rotation.x = -Math.PI / 2;
+      barGroup.add(purityMark);
+
+      // Weight mark
+      const weightMark = new THREE.Mesh(
+        new THREE.PlaneGeometry(barWidth * 0.3, barHeight * 0.1),
+        engravingMaterial
+      );
+      weightMark.position.set(0, barHeight / 2 + 0.001, -barDepth * 0.3);
+      weightMark.rotation.x = -Math.PI / 2;
+      barGroup.add(weightMark);
+
+      // Corner accents (small decorative elements)
+      const cornerAccent = new THREE.Mesh(
+        new THREE.BoxGeometry(bevelSize * 2, bevelSize, bevelSize * 2),
+        engravingMaterial
+      );
+      for (let i = 0; i < 4; i++) {
+        const corner = cornerAccent.clone();
+        const angle = (i / 4) * Math.PI * 2;
+        corner.position.set(
+          Math.cos(angle) * (barWidth / 2 - bevelSize),
+          barHeight / 2 - bevelSize / 2,
+          Math.sin(angle) * (barDepth / 2 - bevelSize)
+        );
+        barGroup.add(corner);
+      }
+
+      // Add slight rotation variation for visual interest
+      barGroup.rotation.y = (Math.random() - 0.5) * 0.1;
+      barGroup.position.copy(position);
+      barGroup.castShadow = true;
+      barGroup.receiveShadow = true;
+
+      return barGroup;
     };
 
     // Initialize gold bars in slots
@@ -786,6 +914,52 @@ export default function VaultRender({
     }
   };
 
+  // Create price label sprite
+  const createPriceLabel = (price: number): THREE.Sprite => {
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Could not get canvas context");
+
+    // Set canvas size
+    canvas.width = 256;
+    canvas.height = 128;
+
+    // Draw background
+    context.fillStyle = "rgba(0, 0, 0, 0.8)";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Draw border
+    context.strokeStyle = "#ffd700";
+    context.lineWidth = 4;
+    context.strokeRect(2, 2, canvas.width - 4, canvas.height - 4);
+
+    // Draw text
+    context.fillStyle = "#ffd700";
+    context.font = "bold 48px Arial";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    const priceText = `$${price.toLocaleString()}`;
+    context.fillText(priceText, canvas.width / 2, canvas.height / 2);
+
+    // Create texture from canvas
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+
+    // Create sprite material
+    const spriteMaterial = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      alphaTest: 0.1,
+    });
+
+    // Create sprite
+    const sprite = new THREE.Sprite(spriteMaterial);
+    sprite.scale.set(2, 1, 1); // Adjust size as needed
+    sprite.position.set(0, 2.5, 0); // Position above thief (relative to thief)
+
+    return sprite;
+  };
+
   const performHeist = () => {
     if (
       !sceneRef.current ||
@@ -931,8 +1105,15 @@ export default function VaultRender({
     thief.position.set(0, 8, 10);
     thief.castShadow = true;
     scene.add(thief);
+
+    // Create and add price label above thief
+    const priceLabel = createPriceLabel(pricePerBar);
+    priceLabel.position.set(0, 8 + 2.5, 10); // Position above thief
+    scene.add(priceLabel);
+
     if (sceneRef.current) {
       sceneRef.current.thief = thief;
+      sceneRef.current.priceLabel = priceLabel;
     }
 
     // Show notification
@@ -945,10 +1126,12 @@ export default function VaultRender({
     // Animation timeline
     const tl = gsap.timeline({
       onComplete: () => {
-        // Remove thief and bar
+        // Remove thief, price label, and bar
         scene.remove(thief);
+        if (priceLabel) scene.remove(priceLabel);
         scene.remove(targetBar.mesh);
         delete sceneRef.current!.thief;
+        delete sceneRef.current!.priceLabel;
 
         // Remove from array
         goldBars.splice(randomIndex, 1);
@@ -963,13 +1146,22 @@ export default function VaultRender({
       },
     });
 
-    // Thief entry (slower)
-    tl.to(thief.position, {
+    // Thief entry (slower) - animate thief and price label together
+    const thiefPos = {
+      x: thief.position.x,
+      y: thief.position.y,
+      z: thief.position.z,
+    };
+    tl.to(thiefPos, {
       x: barPosition.x,
       y: barPosition.y + 1,
       z: barPosition.z,
       duration: THIEF_ENTRY_DURATION,
       ease: "power2.out",
+      onUpdate: function () {
+        thief.position.set(thiefPos.x, thiefPos.y, thiefPos.z);
+        priceLabel.position.set(thiefPos.x, thiefPos.y + 2.5, thiefPos.z);
+      },
     });
 
     // Bar theft (slower)
@@ -983,9 +1175,26 @@ export default function VaultRender({
       "-=0.3"
     );
 
-    // Exit (slower)
+    // Exit (slower) - animate thief, price label, and bar together
     tl.to(
-      [thief.position, targetBar.mesh.position],
+      thiefPos,
+      {
+        x: 0,
+        y: 12,
+        z: 15,
+        duration: THIEF_EXIT_DURATION,
+        ease: "power3.in",
+        onUpdate: function () {
+          thief.position.set(thiefPos.x, thiefPos.y, thiefPos.z);
+          priceLabel.position.set(thiefPos.x, thiefPos.y + 2.5, thiefPos.z);
+        },
+      },
+      "-=0.2"
+    );
+
+    // Also animate the bar position
+    tl.to(
+      targetBar.mesh.position,
       {
         x: 0,
         y: 12,
@@ -993,7 +1202,7 @@ export default function VaultRender({
         duration: THIEF_EXIT_DURATION,
         ease: "power3.in",
       },
-      "-=0.2"
+      "-=" + THIEF_EXIT_DURATION
     );
   };
 
@@ -1070,7 +1279,7 @@ export default function VaultRender({
           <button
             onClick={performHeist}
             disabled={isAnimating || totalBars === 0}
-            className="px-6 py-2 rounded-full hover:bg-white/10 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-6 py-2 rounded-full hover:bg-white/10 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             style={{
               fontFamily: "Inter, sans-serif",
               fontWeight: 500,
@@ -1090,7 +1299,7 @@ export default function VaultRender({
       </div>
 
       {/* Notification */}
-      {showNotification && (
+      {/* {showNotification && (
         <div
           className="absolute bottom-8 right-8 z-10 px-6 py-4 rounded-lg backdrop-blur-[20px]"
           style={{
@@ -1107,7 +1316,7 @@ export default function VaultRender({
             -{formatCurrency(notificationAmount)}
           </div>
         </div>
-      )}
+      )} */}
 
       {/* Instructions */}
       <div
