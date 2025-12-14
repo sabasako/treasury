@@ -5,34 +5,72 @@ import { Dashboard } from "../components/Dashboard";
 import { Toaster } from "../components/ui/sonner";
 import { toast } from "sonner";
 
+// decode JWT to extract payload
+function parseJwt(token: string) {
+  try {
+    const base64Url = token.split(".")[1];
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join("")
+    );
+    return JSON.parse(jsonPayload);
+  } catch {
+    return null;
+  }
+}
+
 interface User {
   name: string;
   email: string;
+  username: string; // frontend-friendly username (from JWT)
 }
 
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
 
-  const handleLogin = (email: string, password: string) => {
-    // Mock login - in production this would validate against a backend
+  const handleLogin = (username: string, password: string) => {
+    // Send login request in AuthForm (already storing token)
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    const payload = parseJwt(token);
+    if (!payload) {
+      toast.error("Invalid token");
+      return;
+    }
+
+    // Extract name/username from claims (adjust claim key as per your JWT)
+    const nameFromToken =
+      payload["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"];
+    const usernameFromToken =
+      payload[
+        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"
+      ];
+
     setUser({
-      name: email.split("@")[0],
-      email,
+      name: nameFromToken ?? username,
+      email: username,
+      username: usernameFromToken ?? username,
     });
+
     toast.success("Welcome back!");
   };
 
   const handleRegister = (email: string, password: string, name: string) => {
-    // Mock registration - in production this would create a user in the backend
     setUser({
       name,
       email,
+      username: name, // default to full name
     });
     toast.success("Account created successfully!");
   };
 
   const handleLogout = () => {
     setUser(null);
+    localStorage.removeItem("token");
     toast.info("Logged out successfully");
   };
 
